@@ -91,15 +91,23 @@ class TextWithChanges(original: String) {
         TODO()
     }
 
+    /**
+     * Calculates and returns the amount of line breaks for a given range.
+     */
     fun countBreaks(range: RangeInResult): UInt {
         TODO()
     }
 
+    /**
+     * Counts the amount of visual spaces in a given range. The result value
+     * takes into account the visual offset of other whitespace characters, such
+     * as tabs.
+     */
     fun countSpaces(range: RangeInResult): UInt {
         TODO()
     }
 
     fun applyChanges(): String {
-        TODO()
+        return original
     }
 }

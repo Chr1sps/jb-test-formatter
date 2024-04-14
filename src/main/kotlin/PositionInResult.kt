@@ -1,4 +1,3 @@
 package io.github.chr1sps
 
-class PositionInResult {
-}
+data class PositionInResult(val position: UInt)

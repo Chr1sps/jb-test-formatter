@@ -347,10 +347,7 @@ class TextWithChanges(private val original: String) {
         this._changeSet.find { it.checkInRange(originalPos) }
 
 
-    /**
-     * Calculates and returns the amount of line breaks for a given range.
-     */
-    fun countBreaks(range: RangeInResult): Int {
+    fun countInText(range: RangeInResult, predicate: (Char) -> Int): Int {
         validateRange(range)
         val start = when (range.start) {
             is PositionInResult.InOriginal -> range.start.position
@@ -360,7 +357,6 @@ class TextWithChanges(private val original: String) {
             is PositionInResult.InOriginal -> range.end.position
             is PositionInResult.InChange -> range.end.change.from
         }
-        val predicate: (Char) -> Boolean = { it == '\n' }
         var result = 0
         if (range.start is PositionInResult.InChange) {
             result += this.countInChange(
@@ -380,29 +376,71 @@ class TextWithChanges(private val original: String) {
         return result
     }
 
+    /**
+     * Calculates and returns the amount of line breaks for a given range.
+     */
+    fun countBreaks(range: RangeInResult): Int =
+        countInText(range) { if (it == '\n') 1 else 0 }
+
     private fun countInOriginalWithChanges(
-        intRange: IntRange,
-        predicate: (Char) -> Boolean
+        range: IntRange,
+        predicate: (Char) -> Int
     ): Int {
-        TODO()
+        val changes =
+            _changeSet.filter { it.from >= range.first && it.to <= range.last }
+        if (changes.isEmpty()) return countInOriginal(range, predicate) else {
+            var result = 0
+            val iter = changes.iterator()
+            var change: TextChange? = iter.next()
+            var i = range.first
+            while (i <= range.last) {
+                if (change != null) {
+                    result += if (i == change.from) countInChange(
+                        change,
+                        predicate
+                    ) else countInOriginal(i..change.from, predicate)
+                    i = if (i == change.from) change.to else change.from
+                    change = if (iter.hasNext()) iter.next() else null
+                } else {
+                    result += countInOriginal(i..range.last, predicate)
+                }
+            }
+            return result
+        }
     }
 
     private fun countInChange(
         change: TextChange,
-        intRange: IntRange,
-        predicate: (Char) -> Boolean
-    ): Int {
-        TODO()
-    }
+        predicate: (Char) -> Int
+    ): Int = change.text.sumOf(predicate)
+
+    private fun countInChange(
+        change: TextChange,
+        range: IntRange,
+        predicate: (Char) -> Int
+    ): Int = change.text.substring(range).sumOf(predicate)
+
+    private fun countInOriginal(
+        range: IntRange,
+        predicate: (Char) -> Int
+    ) = original.substring(range).sumOf(predicate)
 
     /**
      * Counts the amount of visual spaces in a given range. The result value
      * takes into account the visual offset of other whitespace characters, such
      * as tabs.
      */
-    fun countSpaces(range: RangeInResult): Int {
-        validateRange(range)
-        TODO()
+    fun countSpaces(range: RangeInResult, spacesPerTab: Int): Int {
+        var col = 0
+        return countInText(range) {
+            val result = when (it) {
+                ' ' -> 1
+                '\t' -> spacesPerTab - col
+                else -> 0
+            }
+            col = (col + 1) % spacesPerTab
+            result
+        }
     }
 
     fun applyChanges(): String {

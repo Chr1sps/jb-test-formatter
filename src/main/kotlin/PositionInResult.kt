@@ -10,7 +10,7 @@ sealed class PositionInResult {
     class InChange(val change: TextChange, val position: Int) :
         PositionInResult() {
         init {
-            require(position >= 0)
+            require(position in 0..change.text.length)
         }
     }
 }

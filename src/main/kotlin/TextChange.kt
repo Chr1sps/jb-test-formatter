@@ -9,8 +9,7 @@ class TextChange(val from: Int, val to: Int, val text: String) :
 
     init {
         require(from >= 0)
-        require(to >= 0)
-        require(to >= from)
+        require(to in 0..from)
         require(text.isBlank())
     }
 
@@ -19,7 +18,6 @@ class TextChange(val from: Int, val to: Int, val text: String) :
         fun genID() = id++
     }
 
-    //    override fun compareTo(other: TextChange) = (this.id - other.id).toInt()
     override fun compareTo(other: TextChange) = (this.from - other.from)
     override fun equals(other: Any?): Boolean {
         if (this === other) return true

@@ -133,7 +133,7 @@ class TextWithChangesTests {
                 assertEquals(
                     expectedString,
                     result,
-                    "Expected: \"${expectedString.withEscapes()}\", actual: \"${result}\""
+                    "Expected: \"${expectedString.withEscapes()}\", actual: \"${result.withEscapes()}\""
                 )
             }
         )

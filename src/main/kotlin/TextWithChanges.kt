@@ -60,23 +60,6 @@ class TextWithChanges(private val original: String) {
     private fun validateOriginalText(range: RangeInResult) =
         guard(countInText(range) { if (it.isWhitespace()) 0 else 1 } == 0) { throw TextException.NonWhitespace() }
 
-    /*
-    TODO
-    - check and assert that the old and new texts contain only ws chars
-    - convert a RangeInResult to a range in original text
-    - if a new change replaced an old one, remove the old one and add the new
-    one - that means that both of the positions must be relative to the original
-    text
-    - if a new change is completely inside an old one, update the old one - that
-    means that both of the edge positions must be relative to the same change
-    - otherwise, check and assert that the ranges don't intersect (intersection
-    means that the position types aren't equal (one relative to text, another to
-    change)) or that they are relative to different changes
-    - when the changes touch, merge them (be wary of empty ranges)
-    - throw an exception when a new change spans over multiple other changes
-    - return an original RangeInResult object that may additionally be altered
-    to reflect the new changes
-    */
     fun addChange(range: RangeInResult, text: String): RangeInResult {
         // TODO: Check if the original string is ws only.
         validateRange(range)
@@ -89,6 +72,8 @@ class TextWithChanges(private val original: String) {
         var newTo: PositionInResult = to
         val newChange = when {
             from is PositionInResult.InOriginal -> {
+                val nextChange =
+                    if (to is PositionInResult.InChange) to.change else null
                 val end = when (to) {
                     is PositionInResult.InOriginal -> to.position
                     is PositionInResult.InChange -> {
@@ -97,7 +82,7 @@ class TextWithChanges(private val original: String) {
                     }
                 }
                 val changes = getChangesInRange(from.position..<end)
-                val newChange = when (changes.size) {
+                var newChange = when (changes.size) {
                     0 -> TextChange(from.position, end, text)
                     1 -> {
                         val change = changes.first()
@@ -107,7 +92,24 @@ class TextWithChanges(private val original: String) {
 
                     else -> throw IllegalArgumentException()
                 }
-                newFrom = if (text.isNotEmpty()) inChange(newChange, 0) else to
+                var shift = 0
+                val prevChange = changeSet.floor(newChange)
+                if (prevChange != null && prevChange.to == newChange.from) {
+                    changeSet.remove(prevChange)
+                    newChange = prevChange merge newChange
+                    shift = prevChange.text.length
+                }
+                if (nextChange != null) {
+                    val oldPos = newChange.to
+                    newChange = newChange merge nextChange
+                    changeSet.remove(nextChange)
+                    newTo = inChange(newChange, oldPos - newChange.from + shift)
+                }
+                newFrom =
+                    if (newChange.text.isNotEmpty()) inChange(
+                        newChange,
+                        shift
+                    ) else to
                 newChange
             }
 
@@ -139,34 +141,10 @@ class TextWithChanges(private val original: String) {
                 newChange
             }
         }
-        val merged = mergeChanges(newChange)
-        changeSet.add(merged)
+        changeSet.add(newChange)
         // TODO: Updating the range after merging.
         val newRange = newFrom upTo newTo
         return newRange
-    }
-
-    /**
-     * Given the new change, searches for changes that may touch it. If there
-     * are any then removes them from the set and merges them with the given
-     * change. The resulting range is then returned from the function. If there
-     * were no adjacent changes then the set isn't altered and the original
-     * change is returned.
-     */
-    private fun mergeChanges(change: TextChange): TextChange {
-        var newChange = change
-        val nextChange = changeSet.find { it.from == change.to }
-        if (nextChange != null) {
-            changeSet.remove(nextChange)
-            newChange = newChange merge nextChange
-        }
-        val prevChange = changeSet.find { it.to == change.from }
-        if (prevChange != null) {
-            changeSet.remove(prevChange)
-            newChange = prevChange merge newChange
-        }
-        changeSet.add(newChange)
-        return newChange
     }
 
     private fun searchInString(

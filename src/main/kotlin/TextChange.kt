@@ -29,12 +29,13 @@ class TextChange(val from: Int, val to: Int, val text: String) :
     }
 
     override fun hashCode() = (from * 31 + to) * 31 + text.hashCode()
-    override fun toString() = "TextChange(from: $from, to: $to, text: $text)"
+    override fun toString() =
+        "TextChange(from: $from, to: $to, text: \"${text.withEscapes()}\")"
 
     infix fun merge(other: TextChange): TextChange {
         require(this.to == other.from)
         return TextChange(this.from, other.to, this.text + other.text)
     }
 
-    fun checkInRange(position: Int): Boolean = position in from..to
+    fun checkInRange(position: Int): Boolean = position in from..<to
 }

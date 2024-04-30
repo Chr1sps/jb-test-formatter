@@ -27,16 +27,16 @@ class TextWithChanges(private val original: String) {
     private fun validatePos(pos: PositionInResult): AggregatePos {
         when (pos) {
             is PositionInResult.InOriginal -> {
-                require(pos.position in 0..original.length)
+                guard(pos.position in 0..original.length) { throw TextException.InvalidPosition() }
                 val change = findChange(pos.position)
-                require(change == null)
+                guard(change == null) { throw TextException.InvalidPosition() }
                 return AggregatePos(pos.position, null)
             }
 
             is PositionInResult.InChange -> {
-                val change = findChange(pos.position)
-                require(change != null)
-                require(pos.position in 0..change.text.length)
+                val change = findChange(pos.change.from)
+                guard(change != null) { throw TextException.InvalidPosition() }
+                guard(pos.position in 0..<change.text.length) { throw TextException.InvalidPosition() }
                 return AggregatePos(change.from, pos.position)
             }
         }
@@ -51,11 +51,14 @@ class TextWithChanges(private val original: String) {
         val (from, to) = range
         val aggFrom = validatePos(from)
         val aggTo = validatePos(to)
-        require(aggTo >= aggFrom)
+        guard(aggTo >= aggFrom) { throw TextException.InvalidRange() }
     }
 
     private fun getChangesInRange(range: IntRange) =
-        changeSet.filter { it.from >= range.first && it.to <= range.last }
+        changeSet.filter { it.from >= range.first && it.to <= range.last + 1 }
+
+    private fun validateOriginalText(range: RangeInResult) =
+        guard(countInText(range) { if (it.isWhitespace()) 0 else 1 } == 0) { throw TextException.NonWhitespace() }
 
     /*
     TODO
@@ -75,76 +78,70 @@ class TextWithChanges(private val original: String) {
     to reflect the new changes
     */
     fun addChange(range: RangeInResult, text: String): RangeInResult {
-        // TODO: Check if both the original and the new string are ws only.
+        // TODO: Check if the original string is ws only.
         validateRange(range)
-        require(text.isBlank())
+        guard(text.isBlank()) { throw TextException.NonWhitespace() }
+        validateOriginalText(range)
         val (from, to) = range
-        var newFrom: PositionInResult = from
+        if (from == to && text.isEmpty()) // the change does nothing, just return the original range
+            return range
+        val newFrom: PositionInResult
         var newTo: PositionInResult = to
         val newChange = when {
-            from is PositionInResult.InOriginal && to is PositionInResult.InOriginal -> {
-                val changes = getChangesInRange(from.position..<to.position)
+            from is PositionInResult.InOriginal -> {
+                val end = when (to) {
+                    is PositionInResult.InOriginal -> to.position
+                    is PositionInResult.InChange -> {
+                        guard(to.position == 0) { throw TextException.InvalidPosition() }
+                        to.change.from
+                    }
+                }
+                val changes = getChangesInRange(from.position..<end)
                 val newChange = when (changes.size) {
-                    0 -> TextChange(from.position, to.position, text)
+                    0 -> TextChange(from.position, end, text)
                     1 -> {
                         val change = changes.first()
                         changeSet.remove(change)
-                        TextChange(from.position, to.position, text)
+                        TextChange(from.position, end, text)
                     }
 
                     else -> throw IllegalArgumentException()
                 }
-                newFrom = inChange(newChange, 0)
-                newChange
-            }
-
-
-            from is PositionInResult.InOriginal && to is PositionInResult.InChange -> {
-                require(to.position == to.change.text.length - 1)
-                val changes = getChangesInRange(from.position..<to.change.to)
-                require(changes.size == 1)
-                val oldChange = to.change
-                val oldString = oldChange.text
-                val newString = text + oldString
-                changeSet.remove(oldChange)
-                val newChange =
-                    TextChange(from.position, to.change.to, newString)
-                newFrom = inChange(newChange, 0)
+                newFrom = if (text.isNotEmpty()) inChange(newChange, 0) else to
                 newChange
             }
 
             from is PositionInResult.InChange && to is PositionInResult.InOriginal -> {
-                require(from.position == 0)
+                guard(from.position == 0) { throw TextException.IntersectingChanges() }
                 val changes = getChangesInRange(from.change.from..<to.position)
-                require(changes.size == 1)
+                guard(changes.size == 1) { throw TextException.IntersectingChanges() }
                 val oldChange = from.change
-                val oldString = oldChange.text
-                val newString = oldString + text
                 changeSet.remove(oldChange)
-                val newChange =
-                    TextChange(from.change.from, to.position, newString)
-                newFrom = inChange(newChange, 0)
+                val newChange = TextChange(from.change.from, to.position, text)
+                newFrom = if (text.isNotEmpty()) inChange(newChange, 0) else to
                 newChange
             }
 
-            from is PositionInResult.InChange && to is PositionInResult.InChange -> {
-                require(from.change == to.change)
+            else -> {
+                from as PositionInResult.InChange
+                to as PositionInResult.InChange
+                guard(from.change == to.change) { throw TextException.IntersectingChanges() }
+                guard(changeSet.contains(from.change)) { throw TextException.OutdatedChange() }
                 val oldChange = from.change
                 val oldString = oldChange.text
                 val newString =
                     oldString.replaceRange(from.position..<to.position, text)
                 changeSet.remove(oldChange)
                 val newChange =
-                    TextChange(from.position, to.position, newString)
-                newFrom = inChange(newChange, 0)
+                    TextChange(oldChange.from, oldChange.to, newString)
+                newFrom = inChange(newChange, from.position)
+                newTo = inChange(newChange, to.position + text.length)
                 newChange
             }
-
-            else -> throw Exception("Unreachable")
         }
         val merged = mergeChanges(newChange)
         changeSet.add(merged)
-        // TODO: Updating the range
+        // TODO: Updating the range after merging.
         val newRange = newFrom upTo newTo
         return newRange
     }
@@ -324,15 +321,16 @@ class TextWithChanges(private val original: String) {
         if (range.start is PositionInResult.InChange) {
             result += this.countInChange(
                 range.start.change,
-                range.start.position..range.start.change.text.length,
+                range.start.position..<range.start.change.text.length,
                 predicate
             )
         }
-        result += this.countInOriginalWithChanges(start..end, predicate)
+        if (start < end)
+            result += this.countInOriginalWithChanges(start..<end, predicate)
         if (range.end is PositionInResult.InChange) {
             result += this.countInChange(
                 range.end.change,
-                0..range.end.position,
+                0..<range.end.position,
                 predicate,
             )
         }
@@ -364,6 +362,7 @@ class TextWithChanges(private val original: String) {
                     change = if (iter.hasNext()) iter.next() else null
                 } else {
                     result += countInOriginal(i..range.last, predicate)
+                    break
                 }
             }
             return result

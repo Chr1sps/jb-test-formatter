@@ -15,73 +15,105 @@ class TextWithChangesTests {
     }
 
     @Test
-    fun testChangesNoMerging() = assertAll(
+    fun testChangesNoMerging() {
         testChange(
             "Some text",
             inOriginal(0) upTo inOriginal(0),
             " ",
             inChange(TextChange(0, 0, " "), 0) upTo inOriginal(0),
             " Some text"
-        ),
+        )
         testChange(
             "Some text",
             inOriginal(4) upTo inOriginal(5),
             "",
             inOriginal(5) upTo inOriginal(5),
             "Sometext"
-        ),
+        )
         testChange(
             "Some text",
             inOriginal(0) upTo inOriginal(0),
             "",
             inOriginal(0) upTo inOriginal(0),
             "Some text"
-        ),
+        )
         testChange(
             "Some text ",
             inOriginal(9) upTo inOriginal(10),
             "  ",
             inChange(TextChange(9, 10, "  "), 0) upTo inOriginal(10),
             "Some text  "
-        ),
-    )
+        )
+    }
 
     @Test
-    fun testChangesWithMerging() = testChange(
-        "\n \na".addChanges(
-            inOriginal(0) upTo inOriginal(1) replacedWith "\t",
-            inOriginal(2) upTo inOriginal(3) replacedWith "\t",
-        ),
-        inOriginal(1) upTo inOriginal(2),
-        "  ",
-        TextChange(0, 3, "\t  \t").range(1, 3),
-        "\t  \ta"
-    )()
+    fun testChangesWithMerging() {
+        testChange(
+            "\n \na".addChanges(
+                inOriginal(0) upTo inOriginal(1) replacedWith "\t",
+                inOriginal(2) upTo inOriginal(3) replacedWith "\t",
+            ),
+            inOriginal(1) upTo inChange(TextChange(2, 3, "\t"), 0),
+            "  ",
+            TextChange(0, 3, "\t  \t").range(1, 3),
+            "\t  \ta"
+        )
+    }
 
 
     @Test
     fun testChangesInsideChanges() {
-        assertAll(
-            testChange(
-                "\n\na".addChanges(
-                    inOriginal(0) upTo inOriginal(2) replacedWith "\t\t",
-                ),
-                TextChange(0, 2, "\t\t").range(1, 1),
-                "  ",
-                TextChange(0, 2, "\t  \t").range(1, 3),
-                "\t  \ta"
+        testChange(
+            "\n\na".addChanges(
+                inOriginal(0) upTo inOriginal(2) replacedWith "\t\t",
             ),
-            testChange(
-                "\n\na".addChanges(
-                    inOriginal(0) upTo inOriginal(2) replacedWith "\t\t",
-                ),
-                inChange(TextChange(0, 2, "\t\t"), 0) upTo inOriginal(2),
-                "  ",
-                inChange(TextChange(0, 2, "  "), 0) upTo inOriginal(2),
-                "  a"
-            )
-
+            TextChange(0, 2, "\t\t").range(1, 1),
+            "  ",
+            TextChange(0, 2, "\t  \t").range(1, 3),
+            "\t  \ta"
         )
+        testChange(
+            "\n\na".addChanges(
+                inOriginal(0) upTo inOriginal(2) replacedWith "\t\t",
+            ),
+            inChange(TextChange(0, 2, "\t\t"), 0) upTo inOriginal(2),
+            "  ",
+            inChange(TextChange(0, 2, "  "), 0) upTo inOriginal(2),
+            "  a"
+        )
+
+    }
+
+    @Test
+    fun testChangesCoveringChanges() {
+        testChange(
+            "\n\n\na".addChanges(
+                inOriginal(1) upTo inOriginal(2) replacedWith "\t",
+            ),
+            inOriginal(0) upTo inOriginal(3),
+            "   ",
+            inChange(TextChange(0, 3, "   "), 0) upTo inOriginal(3),
+            "   a"
+        )
+        testChange(
+            "\n\na".addChanges(
+                inOriginal(0) upTo inOriginal(1) replacedWith "\t",
+            ),
+            inChange(TextChange(0, 1, "\t"), 0) upTo inOriginal(2),
+            "  ",
+            inChange(TextChange(0, 2, "  "), 0) upTo inOriginal(2),
+            "  a"
+        )
+        testChange(
+            "\n\na".addChanges(
+                inOriginal(1) upTo inOriginal(2) replacedWith "",
+            ),
+            inOriginal(0) upTo inOriginal(2),
+            "  ",
+            inChange(TextChange(0, 2, "  "), 0) upTo inOriginal(2),
+            "  a"
+        )
+
     }
 
     private fun testChange(
@@ -90,14 +122,19 @@ class TextWithChangesTests {
         changeString: String,
         expectedRange: RangeInResult,
         expectedString: String
-    ): () -> Unit = {
+    ) {
         val newRange = original.addChange(changeRange, changeString)
         assertAll(
             {
                 assertEquals(expectedRange, newRange)
             },
             {
-                assertEquals(expectedString, original.applyChanges())
+                val result = original.applyChanges()
+                assertEquals(
+                    expectedString,
+                    result,
+                    "Expected: \"${expectedString.withEscapes()}\", actual: \"${result}\""
+                )
             }
         )
     }
@@ -118,22 +155,33 @@ class TextWithChangesTests {
 
 
     @Test
-    fun validatingWsChars() = assertAll(
-        {
-            assertThrows<IllegalArgumentException> {
-                "Some text".addChanges(
-                    inOriginal(0) upTo inOriginal(0) replacedWith "text"
-                )
-            }
-        },
-        {
-            assertThrows<IllegalArgumentException> {
-                "Some text".addChanges(
-                    inOriginal(0) upTo inOriginal(1) replacedWith " "
-                )
-            }
+    fun validatingWsChars() {
+        assertThrows<TextException.NonWhitespace> {
+            "Some text".addChanges(
+                inOriginal(0) upTo inOriginal(0) replacedWith "text"
+            )
         }
-    )
+        assertThrows<TextException.NonWhitespace> {
+            "Some text".addChanges(
+                inOriginal(0) upTo inOriginal(1) replacedWith " "
+            )
+        }
+    }
+
+    @Test
+    fun detectingIntersections() {
+        assertThrows<TextException.IntersectingChanges> {
+            val base = "\t\t\t".addChanges(
+                inOriginal(0) upTo inOriginal(1) replacedWith "\n\n"
+            )
+            base.addChanges(
+                inChange(
+                    TextChange(0, 1, "\n\n"),
+                    1
+                ) upTo inOriginal(2) replacedWith " "
+            )
+        }
+    }
 
 }
 

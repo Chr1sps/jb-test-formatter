@@ -61,12 +61,11 @@ class TextWithChanges(private val original: String) {
         guard(countInText(range) { if (it.isWhitespace()) 0 else 1 } == 0) { throw TextException.NonWhitespace() }
 
     fun addChange(range: RangeInResult, text: String): RangeInResult {
-        // TODO: Check if the original string is ws only.
         validateRange(range)
         guard(text.isBlank()) { throw TextException.NonWhitespace() }
         validateOriginalText(range)
         val (from, to) = range
-        if (from == to && text.isEmpty()) // the change does nothing, just return the original range
+        if (from == to && text.isEmpty())
             return range
         val newFrom: PositionInResult
         var newTo: PositionInResult = to
@@ -100,10 +99,10 @@ class TextWithChanges(private val original: String) {
                     shift = prevChange.text.length
                 }
                 if (nextChange != null) {
-                    val oldPos = newChange.to
+                    val oldLength = newChange.text.length
                     newChange = newChange merge nextChange
                     changeSet.remove(nextChange)
-                    newTo = inChange(newChange, oldPos - newChange.from + shift)
+                    newTo = inChange(newChange, oldLength)
                 }
                 newFrom =
                     if (newChange.text.isNotEmpty()) inChange(
@@ -115,8 +114,8 @@ class TextWithChanges(private val original: String) {
 
             from is PositionInResult.InChange && to is PositionInResult.InOriginal -> {
                 guard(from.position == 0) { throw TextException.IntersectingChanges() }
-                val changes = getChangesInRange(from.change.from..<to.position)
-                guard(changes.size == 1) { throw TextException.IntersectingChanges() }
+                val change = changeSet.ceiling(from.change)
+                guard(change == from.change) { throw TextException.IntersectingChanges() }
                 val oldChange = from.change
                 changeSet.remove(oldChange)
                 val newChange = TextChange(from.change.from, to.position, text)
@@ -128,7 +127,6 @@ class TextWithChanges(private val original: String) {
                 from as PositionInResult.InChange
                 to as PositionInResult.InChange
                 guard(from.change == to.change) { throw TextException.IntersectingChanges() }
-                guard(changeSet.contains(from.change)) { throw TextException.OutdatedChange() }
                 val oldChange = from.change
                 val oldString = oldChange.text
                 val newString =
@@ -142,42 +140,10 @@ class TextWithChanges(private val original: String) {
             }
         }
         changeSet.add(newChange)
-        // TODO: Updating the range after merging.
         val newRange = newFrom upTo newTo
         return newRange
     }
 
-    private fun searchInString(
-        string: String,
-        range: IntRange,
-        predicate: (Char) -> Boolean,
-        fromStart: Boolean
-    ): Pair<Int, ResultType>? {
-        val index = string.substring(range).run {
-            if (fromStart) indexOfFirst(predicate) else indexOfLast(predicate)
-        }
-        return if (index == -1) null else Pair(
-            index, string[index].getResultType()
-        )
-    }
-
-    private fun searchInChange(
-        change: TextChange,
-        range: IntRange,
-        predicate: (Char) -> Boolean,
-        fromStart: Boolean
-    ): Pair<PositionInResult, ResultType>? {
-        val result = searchInString(change.text, range, predicate, fromStart)
-        return if (result == null) null else {
-            val (index, type) = result
-            Pair(inChange(change, index), type)
-        }
-    }
-
-    private fun searchInChange(
-        change: TextChange, predicate: (Char) -> Boolean, fromStart: Boolean
-    ): Pair<PositionInResult, ResultType>? =
-        searchInChange(change, change.from..change.to, predicate, fromStart)
 
     private fun searchInOriginal(
         range: IntRange, predicate: (Char) -> Boolean, fromStart: Boolean
@@ -263,9 +229,15 @@ class TextWithChanges(private val original: String) {
                 )
                 if (found != null) return found
             }
-            found =
-                searchInOriginalWithChanges(start..end, predicate, fromStart)
-            if (found != null) return found
+            if (start <= end) {
+                found =
+                    searchInOriginalWithChanges(
+                        start..<end,
+                        predicate,
+                        fromStart
+                    )
+                if (found != null) return found
+            }
             if (range.end is PositionInResult.InChange) {
                 found = searchInChange(
                     range.end.change,
@@ -289,6 +261,44 @@ class TextWithChanges(private val original: String) {
     private fun findChange(originalPos: Int): TextChange? =
         this.changeSet.find { it.checkInRange(originalPos) }
 
+    private fun countInChange(
+        change: TextChange, predicate: (Char) -> Int
+    ): Int = change.text.sumOf(predicate)
+
+    private fun countInChange(
+        change: TextChange, range: IntRange, predicate: (Char) -> Int
+    ): Int = change.text.substring(range).sumOf(predicate)
+
+    private fun countInOriginal(
+        range: IntRange, predicate: (Char) -> Int
+    ) = original.substring(range).sumOf(predicate)
+
+
+    private fun countInOriginalWithChanges(
+        range: IntRange, predicate: (Char) -> Int
+    ): Int {
+        val changes =
+            changeSet.filter { it.from >= range.first && it.to <= range.last }
+        if (changes.isEmpty()) return countInOriginal(range, predicate) else {
+            var result = 0
+            val iter = changes.iterator()
+            var change: TextChange? = iter.next()
+            var i = range.first
+            while (i <= range.last) {
+                if (change != null) {
+                    result += if (i == change.from) countInChange(
+                        change, predicate
+                    ) else countInOriginal(i..change.from, predicate)
+                    i = if (i == change.from) change.to else change.from
+                    change = if (iter.hasNext()) iter.next() else null
+                } else {
+                    result += countInOriginal(i..range.last, predicate)
+                    break
+                }
+            }
+            return result
+        }
+    }
 
     private fun countInText(
         range: RangeInResult, predicate: (Char) -> Int
@@ -321,43 +331,6 @@ class TextWithChanges(private val original: String) {
     fun countBreaks(range: RangeInResult): Int =
         countInText(range) { if (it == '\n') 1 else 0 }
 
-    private fun countInOriginalWithChanges(
-        range: IntRange, predicate: (Char) -> Int
-    ): Int {
-        val changes =
-            changeSet.filter { it.from >= range.first && it.to <= range.last }
-        if (changes.isEmpty()) return countInOriginal(range, predicate) else {
-            var result = 0
-            val iter = changes.iterator()
-            var change: TextChange? = iter.next()
-            var i = range.first
-            while (i <= range.last) {
-                if (change != null) {
-                    result += if (i == change.from) countInChange(
-                        change, predicate
-                    ) else countInOriginal(i..change.from, predicate)
-                    i = if (i == change.from) change.to else change.from
-                    change = if (iter.hasNext()) iter.next() else null
-                } else {
-                    result += countInOriginal(i..range.last, predicate)
-                    break
-                }
-            }
-            return result
-        }
-    }
-
-    private fun countInChange(
-        change: TextChange, predicate: (Char) -> Int
-    ): Int = change.text.sumOf(predicate)
-
-    private fun countInChange(
-        change: TextChange, range: IntRange, predicate: (Char) -> Int
-    ): Int = change.text.substring(range).sumOf(predicate)
-
-    private fun countInOriginal(
-        range: IntRange, predicate: (Char) -> Int
-    ) = original.substring(range).sumOf(predicate)
 
     /**
      * Counts the amount of visual spaces in a given range. The result value
@@ -389,3 +362,5 @@ class TextWithChanges(private val original: String) {
         return result
     }
 }
+
+fun String.withChanges() = TextWithChanges(this)

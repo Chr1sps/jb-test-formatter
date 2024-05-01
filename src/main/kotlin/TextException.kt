@@ -5,6 +5,5 @@ sealed class TextException : IllegalArgumentException() {
     class InvalidRange : TextException()
     class NonWhitespace : TextException()
     class IntersectingChanges : TextException()
-    class OutdatedChange : TextException()
 }
 

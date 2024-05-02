@@ -7,7 +7,6 @@ import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.MethodSource
 import kotlin.test.assertEquals
-import kotlin.test.todo
 
 
 class TextWithChangesTests {
@@ -318,6 +317,16 @@ class TextWithChangesTests {
     }
 
     @Nested
+    inner class AddingTests {
+        @ParameterizedTest
+        @MethodSource("TextWithChangesTests#dataInvalidRanges")
+        fun testInvalidRanges(data: ErrorTestData) {
+            dataInvalidRanges()
+            testThrows<TextException.InvalidRange>(data)
+        }
+    }
+
+    @Nested
     inner class SearchTests {
 
         @Test
@@ -373,14 +382,103 @@ class TextWithChangesTests {
     @Nested
     inner class BreakCountTests {
         @Test
-        fun testCountBreaks() = todo {
+        fun testEmptyString() {
+            assert(
+                "".withChanges()
+                    .countBreaks(inOriginal(0) upTo inOriginal(0)) == 0
+            )
+        }
+
+        @Test
+        fun testBreaksInOriginal() {
+            val original = "1\n2\n3".withChanges()
+            assert(original.countBreaks(inOriginal(0) upTo inOriginal(1)) == 0)
+            assert(original.countBreaks(inOriginal(1) upTo inOriginal(1)) == 0)
+            assert(original.countBreaks(inOriginal(1) upTo inOriginal(2)) == 1)
+            assert(original.countBreaks(inOriginal(2) upTo inOriginal(2)) == 0)
+            assert(original.countBreaks(inOriginal(0) upTo inOriginal(5)) == 2)
+        }
+
+        @Test
+        fun testBreaksInChanges() {
+            val original = "123".addChanges(
+                inOriginal(0) upTo inOriginal(0) replacedWith "\n",
+                inOriginal(1) upTo inOriginal(1) replacedWith "\n",
+                inOriginal(2) upTo inOriginal(2) replacedWith "\n",
+                inOriginal(3) upTo inOriginal(3) replacedWith "\n",
+            )
+            assert(original.countBreaks(inOriginal(0) upTo inOriginal(1)) == 1)
+            assert(original.countBreaks(inOriginal(0) upTo inOriginal(3)) == 3)
+            assert(
+                original.countBreaks(
+                    inChange(
+                        TextChange(0, 0, "\n"),
+                        0
+                    ) upTo inOriginal(3)
+                ) == 4
+            )
+        }
+
+        @Test
+        fun testRemovedBreaks() {
+            val original = "\n1\n2\n3\n".addChanges(
+                inOriginal(0) upTo inOriginal(1) replacedWith "",
+                inOriginal(2) upTo inOriginal(3) replacedWith "",
+                inOriginal(4) upTo inOriginal(5) replacedWith "",
+                inOriginal(6) upTo inOriginal(7) replacedWith "",
+            )
+            assert(original.countBreaks(inOriginal(1) upTo inOriginal(7)) == 0)
         }
     }
 
     @Nested
     inner class SpaceCountTests {
         @Test
-        fun testCountSpaces() = todo {
+        fun testEmptyString() {
+            assert(
+                TextWithChanges("").countSpaces(
+                    inOriginal(0) upTo inOriginal(0),
+                    4
+                ) == 0
+            )
+        }
+
+        @Test
+        fun testOriginalSpace() {
+            assert(
+                TextWithChanges(" ").countSpaces(
+                    inOriginal(0) upTo inOriginal(1),
+                    4
+                ) == 1
+            )
+        }
+
+        @Test
+        fun testOriginalTabs() {
+            assert(
+                TextWithChanges("\t").countSpaces(
+                    inOriginal(0) upTo inOriginal(1),
+                    4
+                ) == 4
+            )
+            assert(
+                TextWithChanges("a\t").countSpaces(
+                    inOriginal(0) upTo inOriginal(2),
+                    4
+                ) == 3
+            )
+            assert(
+                TextWithChanges("aaa\t").countSpaces(
+                    inOriginal(0) upTo inOriginal(4),
+                    4
+                ) == 1
+            )
+            assert(
+                TextWithChanges("aaaa\t").countSpaces(
+                    inOriginal(0) upTo inOriginal(5),
+                    4
+                ) == 4
+            )
         }
     }
 }

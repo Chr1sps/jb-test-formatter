@@ -34,7 +34,7 @@ class TextWithChanges(private val original: String) {
             }
 
             is PositionInResult.InChange -> {
-                val change = findChange(pos.change.from)
+                val change = findChange(pos.change)
                 guard(change != null) { throw TextException.InvalidPosition() }
                 guard(pos.position in 0..<change.text.length) { throw TextException.InvalidPosition() }
                 return AggregatePos(change.from, pos.position)
@@ -261,6 +261,9 @@ class TextWithChanges(private val original: String) {
     private fun findChange(originalPos: Int): TextChange? =
         this.changeSet.find { it.checkInRange(originalPos) }
 
+    private fun findChange(change: TextChange): TextChange? =
+        this.changeSet.find { it == change }
+
     private fun countInChange(
         change: TextChange, predicate: (Char) -> Int
     ): Int = change.text.sumOf(predicate)
@@ -278,19 +281,21 @@ class TextWithChanges(private val original: String) {
         range: IntRange, predicate: (Char) -> Int
     ): Int {
         val changes =
-            changeSet.filter { it.from >= range.first && it.to <= range.last }
+            changeSet.filter { it.from >= range.first + 1 && it.to <= range.last + 1 }
         if (changes.isEmpty()) return countInOriginal(range, predicate) else {
             var result = 0
             val iter = changes.iterator()
             var change: TextChange? = iter.next()
             var i = range.first
-            while (i <= range.last) {
+            while (i <= range.last || change != null) {
                 if (change != null) {
                     result += if (i == change.from) countInChange(
                         change, predicate
-                    ) else countInOriginal(i..change.from, predicate)
-                    i = if (i == change.from) change.to else change.from
-                    change = if (iter.hasNext()) iter.next() else null
+                    ) else countInOriginal(i..<change.from, predicate)
+                    val newI = if (i == change.from) change.to else change.from
+                    if (i == change.from)
+                        change = if (iter.hasNext()) iter.next() else null
+                    i = newI
                 } else {
                     result += countInOriginal(i..range.last, predicate)
                     break

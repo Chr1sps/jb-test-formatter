@@ -30,35 +30,3 @@ inline fun guard(condition: Boolean, handler: () -> Nothing) {
     }
     if (!condition) handler()
 }
-
-fun searchInString(
-    string: String,
-    range: IntRange,
-    predicate: (Char) -> Boolean,
-    fromStart: Boolean
-): Pair<Int, ResultType>? {
-    val index = string.substring(range).run {
-        if (fromStart) indexOfFirst(predicate) else indexOfLast(predicate)
-    }
-    return if (index == -1) null else Pair(
-        index, string[index].getResultType()
-    )
-}
-
-fun searchInChange(
-    change: TextChange,
-    range: IntRange,
-    predicate: (Char) -> Boolean,
-    fromStart: Boolean
-): Pair<PositionInResult, ResultType>? {
-    val result = searchInString(change.text, range, predicate, fromStart)
-    return if (result == null) null else {
-        val (index, type) = result
-        Pair(inChange(change, index), type)
-    }
-}
-
-fun searchInChange(
-    change: TextChange, predicate: (Char) -> Boolean, fromStart: Boolean
-): Pair<PositionInResult, ResultType>? =
-    searchInChange(change, change.from..change.to, predicate, fromStart)

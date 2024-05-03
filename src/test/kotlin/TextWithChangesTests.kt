@@ -259,65 +259,60 @@ class TextWithChangesTests {
         data.expectedString
     )
 
-    @Test
-    fun testNoChanges() {
-        val original = "Some text"
-        val withChanges = TextWithChanges(original)
-        val result = withChanges.applyChanges()
-        assertEquals(original, result)
-    }
-
-    @ParameterizedTest
-    @MethodSource("dataNoMerging")
-    fun testChangesNoMerging(data: TestData) {
-        testChange(data)
-    }
-
-    @ParameterizedTest
-    @MethodSource("dataWithMerging")
-    fun testChangesWithMerging(data: TestData) {
-        testChange(data)
-    }
-
-
-    @ParameterizedTest
-    @MethodSource("dataInside")
-    fun testChangesInsideChanges(data: TestData) {
-        testChange(data)
-    }
-
-    @ParameterizedTest
-    @MethodSource("dataCovering")
-    fun testChangesCoveringChanges(data: TestData) {
-        testChange(data)
-    }
-
-    @ParameterizedTest
-    @MethodSource("dataWhitespace")
-    fun testValidatingWS(data: ErrorTestData) {
-        testThrows<TextException.NonWhitespace>(data)
-    }
-
-    @ParameterizedTest
-    @MethodSource("dataIntersections")
-    fun testIntersections(data: ErrorTestData) {
-        testThrows<TextException.IntersectingChanges>(data)
-    }
-
-    @ParameterizedTest
-    @MethodSource("dataInvalidPositions")
-    fun testInvalidPositions(data: ErrorTestData) {
-        testThrows<TextException.InvalidPosition>(data)
-    }
-
-    @ParameterizedTest
-    @MethodSource("dataInvalidRanges")
-    fun testInvalidRanges(data: ErrorTestData) {
-        testThrows<TextException.InvalidRange>(data)
-    }
 
     @Nested
     inner class AddingTests {
+        @Test
+        fun testNoChanges() {
+            val original = "Some text"
+            val withChanges = TextWithChanges(original)
+            val result = withChanges.applyChanges()
+            assertEquals(original, result)
+        }
+
+        @ParameterizedTest
+        @MethodSource("TextWithChangesTests#dataNoMerging")
+        fun testChangesNoMerging(data: TestData) {
+            testChange(data)
+        }
+
+        @ParameterizedTest
+        @MethodSource("TextWithChangesTests#dataWithMerging")
+        fun testChangesWithMerging(data: TestData) {
+            testChange(data)
+        }
+
+
+        @ParameterizedTest
+        @MethodSource("TextWithChangesTests#dataInside")
+        fun testChangesInsideChanges(data: TestData) {
+            testChange(data)
+        }
+
+        @ParameterizedTest
+        @MethodSource("TextWithChangesTests#dataCovering")
+        fun testChangesCoveringChanges(data: TestData) {
+            testChange(data)
+        }
+
+        @ParameterizedTest
+        @MethodSource("TextWithChangesTests#dataWhitespace")
+        fun testValidatingWS(data: ErrorTestData) {
+            testThrows<TextException.NonWhitespace>(data)
+        }
+
+        @ParameterizedTest
+        @MethodSource("TextWithChangesTests#dataIntersections")
+        fun testIntersections(data: ErrorTestData) {
+            testThrows<TextException.IntersectingChanges>(data)
+        }
+
+        @ParameterizedTest
+        @MethodSource("TextWithChangesTests#dataInvalidPositions")
+        fun testInvalidPositions(data: ErrorTestData) {
+            testThrows<TextException.InvalidPosition>(data)
+        }
+
         @ParameterizedTest
         @MethodSource("TextWithChangesTests#dataInvalidRanges")
         fun testInvalidRanges(data: ErrorTestData) {
@@ -351,31 +346,140 @@ class TextWithChangesTests {
                 )
             )
             assertNull(
-                original.search(
+                original.searchLast(
                     inOriginal(0) upTo inOriginal(0),
                     SearchType.NON_WHITESPACE,
-                    false
                 )
             )
             assertNull(
-                original.search(
+                original.searchLast(
                     inOriginal(0) upTo inOriginal(0),
                     SearchType.LINE_BREAK,
-                    false
                 )
             )
             assertNull(
-                original.search(
+                original.searchLast(
                     inOriginal(0) upTo inOriginal(0),
                     SearchType.BOTH,
-                    false
                 )
             )
         }
 
         @Test
-        fun testSearching() {
+        fun testInOriginal() {
+            val original = " \na a\n".withChanges()
+            assertEquals(
+                Pair(inOriginal(1), ResultType.LINE_BREAK),
+                original.search(
+                    inOriginal(0) upTo inOriginal(6),
+                    SearchType.LINE_BREAK
+                )
+            )
+            assertEquals(
+                Pair(inOriginal(2), ResultType.NON_WHITESPACE),
+                original.search(
+                    inOriginal(0) upTo inOriginal(6),
+                    SearchType.NON_WHITESPACE
+                )
+            )
+            assertEquals(
+                Pair(inOriginal(1), ResultType.LINE_BREAK),
+                original.search(
+                    inOriginal(0) upTo inOriginal(6),
+                    SearchType.BOTH
+                )
+            )
+            assertEquals(
+                Pair(inOriginal(5), ResultType.LINE_BREAK),
+                original.searchLast(
+                    inOriginal(0) upTo inOriginal(6),
+                    SearchType.LINE_BREAK,
+                )
+            )
+            assertEquals(
+                Pair(inOriginal(4), ResultType.NON_WHITESPACE),
+                original.searchLast(
+                    inOriginal(0) upTo inOriginal(6),
+                    SearchType.NON_WHITESPACE,
+                )
+            )
+            assertEquals(
+                Pair(inOriginal(5), ResultType.LINE_BREAK),
+                original.searchLast(
+                    inOriginal(0) upTo inOriginal(6),
+                    SearchType.BOTH,
+                )
+            )
+        }
 
+        @Test
+        fun testAdded() {
+            val original = "aa".addChanges(
+                inOriginal(0) upTo inOriginal(0) replacedWith " \n",
+                inOriginal(1) upTo inOriginal(1) replacedWith " ",
+                inOriginal(2) upTo inOriginal(2) replacedWith "\n",
+            )
+            assertEquals(
+                Pair(
+                    inChange(TextChange(0, 0, " \n"), 1),
+                    ResultType.LINE_BREAK
+                ),
+                original.search(
+                    inChange(TextChange(0, 0, " \n"), 0) upTo inOriginal(2),
+                    SearchType.LINE_BREAK
+                )
+            )
+            assertEquals(
+                Pair(
+                    inOriginal(0),
+                    ResultType.NON_WHITESPACE
+                ),
+                original.search(
+                    inChange(TextChange(0, 0, " \n"), 0) upTo inOriginal(2),
+                    SearchType.NON_WHITESPACE
+                )
+            )
+            assertEquals(
+                Pair(
+                    inChange(TextChange(0, 0, " \n"), 1),
+                    ResultType.LINE_BREAK
+                ),
+                original.search(
+                    inChange(TextChange(0, 0, " \n"), 0) upTo inOriginal(2),
+                    SearchType.BOTH
+                )
+            )
+            assertEquals(
+                Pair(
+                    inChange(TextChange(0, 0, " \n"), 1),
+                    ResultType.LINE_BREAK
+                ),
+                original.searchLast(
+                    inChange(TextChange(0, 0, " \n"), 0) upTo inOriginal(2),
+                    SearchType.LINE_BREAK,
+                )
+            )
+            assertEquals(
+                Pair(inOriginal(1), ResultType.NON_WHITESPACE),
+                original.searchLast(
+                    inChange(TextChange(0, 0, " \n"), 0) upTo inOriginal(2),
+                    SearchType.NON_WHITESPACE,
+                )
+            )
+            assertEquals(
+                Pair(
+                    inChange(TextChange(0, 0, " \n"), 1),
+                    ResultType.LINE_BREAK
+                ),
+                original.searchLast(
+                    inChange(TextChange(0, 0, " \n"), 0) upTo inOriginal(2),
+                    SearchType.BOTH,
+                )
+            )
+        }
+
+        @Test
+        fun testRemoved() {
         }
     }
 
@@ -383,39 +487,67 @@ class TextWithChangesTests {
     inner class BreakCountTests {
         @Test
         fun testEmptyString() {
-            assert(
+            assertEquals(
+                0,
                 "".withChanges()
-                    .countBreaks(inOriginal(0) upTo inOriginal(0)) == 0
+                    .countBreaks(inOriginal(0) upTo inOriginal(0))
             )
         }
 
         @Test
         fun testBreaksInOriginal() {
             val original = "1\n2\n3".withChanges()
-            assert(original.countBreaks(inOriginal(0) upTo inOriginal(1)) == 0)
-            assert(original.countBreaks(inOriginal(1) upTo inOriginal(1)) == 0)
-            assert(original.countBreaks(inOriginal(1) upTo inOriginal(2)) == 1)
-            assert(original.countBreaks(inOriginal(2) upTo inOriginal(2)) == 0)
-            assert(original.countBreaks(inOriginal(0) upTo inOriginal(5)) == 2)
+            assertEquals(
+                0,
+                original.countBreaks(inOriginal(0) upTo inOriginal(1))
+            )
+            assertEquals(
+                0,
+                original.countBreaks(inOriginal(1) upTo inOriginal(1))
+            )
+            assertEquals(
+                1,
+                original.countBreaks(inOriginal(1) upTo inOriginal(2))
+            )
+            assertEquals(
+                0,
+                original.countBreaks(inOriginal(2) upTo inOriginal(2))
+            )
+            assertEquals(
+                2,
+                original.countBreaks(inOriginal(0) upTo inOriginal(5))
+            )
         }
 
         @Test
         fun testBreaksInChanges() {
-            val original = "123".addChanges(
+            val original = "12".addChanges(
                 inOriginal(0) upTo inOriginal(0) replacedWith "\n",
-                inOriginal(1) upTo inOriginal(1) replacedWith "\n",
+                inOriginal(1) upTo inOriginal(1) replacedWith "\n\n",
                 inOriginal(2) upTo inOriginal(2) replacedWith "\n",
-                inOriginal(3) upTo inOriginal(3) replacedWith "\n",
             )
-            assert(original.countBreaks(inOriginal(0) upTo inOriginal(1)) == 1)
-            assert(original.countBreaks(inOriginal(0) upTo inOriginal(3)) == 3)
-            assert(
+            assertEquals(
+                2,
+                original.countBreaks(inOriginal(0) upTo inOriginal(1))
+            )
+            assertEquals(
+                3,
+                original.countBreaks(inOriginal(0) upTo inOriginal(2))
+            )
+            assertEquals(
+                4,
                 original.countBreaks(
                     inChange(
                         TextChange(0, 0, "\n"),
                         0
-                    ) upTo inOriginal(3)
-                ) == 4
+                    ) upTo inOriginal(2)
+                )
+            )
+            assertEquals(
+                1, original.countBreaks(
+                    inChange(TextChange(1, 1, "\n\n"), 0) upTo
+                            inChange(TextChange(1, 1, "\n\n"), 1)
+                )
             )
         }
 
@@ -427,7 +559,10 @@ class TextWithChangesTests {
                 inOriginal(4) upTo inOriginal(5) replacedWith "",
                 inOriginal(6) upTo inOriginal(7) replacedWith "",
             )
-            assert(original.countBreaks(inOriginal(1) upTo inOriginal(7)) == 0)
+            assertEquals(
+                0,
+                original.countBreaks(inOriginal(1) upTo inOriginal(7))
+            )
         }
     }
 
@@ -435,49 +570,97 @@ class TextWithChangesTests {
     inner class SpaceCountTests {
         @Test
         fun testEmptyString() {
-            assert(
+            assertEquals(
+                0,
                 TextWithChanges("").countSpaces(
                     inOriginal(0) upTo inOriginal(0),
                     4
-                ) == 0
+                )
             )
         }
 
         @Test
         fun testOriginalSpace() {
-            assert(
-                TextWithChanges(" ").countSpaces(
+            assertEquals(
+                1, TextWithChanges(" ").countSpaces(
                     inOriginal(0) upTo inOriginal(1),
                     4
-                ) == 1
+                )
             )
         }
 
         @Test
         fun testOriginalTabs() {
-            assert(
-                TextWithChanges("\t").countSpaces(
+            assertEquals(
+                4, TextWithChanges("\t").countSpaces(
                     inOriginal(0) upTo inOriginal(1),
                     4
-                ) == 4
+                )
             )
-            assert(
+            assertEquals(
+                3,
                 TextWithChanges("a\t").countSpaces(
                     inOriginal(0) upTo inOriginal(2),
                     4
-                ) == 3
+                )
             )
-            assert(
+            assertEquals(
+                1,
                 TextWithChanges("aaa\t").countSpaces(
                     inOriginal(0) upTo inOriginal(4),
                     4
-                ) == 1
+                )
             )
-            assert(
-                TextWithChanges("aaaa\t").countSpaces(
+            assertEquals(
+                4, TextWithChanges("aaaa\t").countSpaces(
                     inOriginal(0) upTo inOriginal(5),
                     4
-                ) == 4
+                )
+            )
+        }
+
+        @Test
+        fun testAddedTabs() {
+            val original = "12".addChanges(
+                inOriginal(0) upTo inOriginal(0) replacedWith "\t",
+                inOriginal(1) upTo inOriginal(1) replacedWith "\t\t",
+                inOriginal(2) upTo inOriginal(2) replacedWith "\t",
+            )
+            assertEquals(
+                7,
+                original.countSpaces(inOriginal(0) upTo inOriginal(1), 4)
+            )
+            assertEquals(
+                10,
+                original.countSpaces(inOriginal(0) upTo inOriginal(2), 4)
+            )
+            assertEquals(
+                14,
+                original.countSpaces(
+                    inChange(
+                        TextChange(0, 0, "\t"),
+                        0
+                    ) upTo inOriginal(2), 4
+                )
+            )
+            assertEquals(
+                4, original.countSpaces(
+                    inChange(TextChange(1, 1, "\t\t"), 0) upTo
+                            inChange(TextChange(1, 1, "\t\t"), 1), 4
+                )
+            )
+        }
+
+        @Test
+        fun testRemovedTabs() {
+            val original = "1\t\t\t2\t".addChanges(
+                inOriginal(2) upTo inOriginal(3) replacedWith "",
+                inOriginal(5) upTo inOriginal(6) replacedWith ""
+            )
+            assertEquals(
+                7, original.countSpaces(
+                    inOriginal(0) upTo inOriginal(6), 4
+                )
             )
         }
     }

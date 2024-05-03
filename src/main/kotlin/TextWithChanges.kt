@@ -60,6 +60,101 @@ class TextWithChanges(private val original: String) {
     private fun validateOriginalText(range: RangeInResult) =
         guard(countInText(range) { if (it.isWhitespace()) 0 else 1 } == 0) { throw TextException.NonWhitespace() }
 
+    /**
+     * Handles the change addition case, where the starting position is based on
+     * the original text. This encompasses the two cases, where merging occurs.
+     */
+    private fun handleFromOriginal(
+        from: PositionInResult.InOriginal,
+        to: PositionInResult,
+        text: String
+    ): Triple<TextChange, PositionInResult, PositionInResult> {
+        var newTo = to
+        val nextChange =
+            if (to is PositionInResult.InChange) to.change else null
+        val end = when (to) {
+            is PositionInResult.InOriginal -> to.position
+            is PositionInResult.InChange -> {
+                guard(to.position == 0) { throw TextException.InvalidPosition() }
+                to.change.from
+            }
+        }
+        val changes = getChangesInRange(from.position..<end)
+        var newChange = when (changes.size) {
+            0 -> TextChange(from.position, end, text)
+            1 -> {
+                val change = changes.first()
+                changeSet.remove(change)
+                TextChange(from.position, end, text)
+            }
+
+            else -> throw IllegalArgumentException()
+        }
+        var shift = 0
+        val prevChange = changeSet.floor(newChange)
+        if (prevChange != null && prevChange.to == newChange.from) {
+            changeSet.remove(prevChange)
+            newChange = prevChange merge newChange
+            shift = prevChange.text.length
+        }
+        if (nextChange != null) {
+            val oldLength = newChange.text.length
+            newChange = newChange merge nextChange
+            changeSet.remove(nextChange)
+            newTo = inChange(newChange, oldLength)
+        }
+        val newFrom =
+            if (newChange.text.isNotEmpty()) inChange(newChange, shift) else to
+        return Triple(newChange, newFrom, newTo)
+    }
+
+    /**
+     * Handles the change addition case, where the start position is inside
+     * another change and the end position is based on the original text. In
+     * this case there is no merging.
+     */
+    private fun handleChangeToOriginal(
+        from: PositionInResult.InChange,
+        to: PositionInResult.InOriginal,
+        text: String
+    ): Triple<TextChange, PositionInResult, PositionInResult> {
+        guard(from.position == 0) { throw TextException.IntersectingChanges() }
+        val change = changeSet.ceiling(from.change)
+        guard(change == from.change) { throw TextException.IntersectingChanges() }
+        val oldChange = from.change
+        changeSet.remove(oldChange)
+        val newChange = TextChange(from.change.from, to.position, text)
+        val newFrom = if (text.isNotEmpty()) inChange(newChange, 0) else to
+        return Triple(newChange, newFrom, to)
+    }
+
+    /**
+     * Handles the change addition case, where both of the positions given in
+     * the RangeInResult object are relative to the same change. Because of the
+     * constraints on addressing text positions, this effectively means that any
+     * situation where the RangeInResult object contains two
+     * PositionInResult.InChange objects then it relates to a situation where
+     * the incoming change is inside another one (as long as the given info is
+     * valid).
+     */
+    private fun handleInsideChange(
+        from: PositionInResult.InChange,
+        to: PositionInResult.InChange,
+        text: String
+    ): Triple<TextChange, PositionInResult.InChange, PositionInResult.InChange> {
+        guard(from.change == to.change) { throw TextException.IntersectingChanges() }
+        val oldChange = from.change
+        val oldString = oldChange.text
+        val newString =
+            oldString.replaceRange(from.position..<to.position, text)
+        changeSet.remove(oldChange)
+        val newChange =
+            TextChange(oldChange.from, oldChange.to, newString)
+        val newFrom = inChange(newChange, from.position)
+        val newTo = inChange(newChange, to.position + text.length)
+        return Triple(newChange, newFrom, newTo)
+    }
+
     fun addChange(range: RangeInResult, text: String): RangeInResult {
         validateRange(range)
         guard(text.isBlank()) { throw TextException.NonWhitespace() }
@@ -67,77 +162,24 @@ class TextWithChanges(private val original: String) {
         val (from, to) = range
         if (from == to && text.isEmpty())
             return range
-        val newFrom: PositionInResult
-        var newTo: PositionInResult = to
-        val newChange = when {
-            from is PositionInResult.InOriginal -> {
-                val nextChange =
-                    if (to is PositionInResult.InChange) to.change else null
-                val end = when (to) {
-                    is PositionInResult.InOriginal -> to.position
-                    is PositionInResult.InChange -> {
-                        guard(to.position == 0) { throw TextException.InvalidPosition() }
-                        to.change.from
-                    }
-                }
-                val changes = getChangesInRange(from.position..<end)
-                var newChange = when (changes.size) {
-                    0 -> TextChange(from.position, end, text)
-                    1 -> {
-                        val change = changes.first()
-                        changeSet.remove(change)
-                        TextChange(from.position, end, text)
-                    }
+        val (newChange, newFrom, newTo) = when {
+            from is PositionInResult.InOriginal -> handleFromOriginal(
+                from,
+                to,
+                text
+            )
 
-                    else -> throw IllegalArgumentException()
-                }
-                var shift = 0
-                val prevChange = changeSet.floor(newChange)
-                if (prevChange != null && prevChange.to == newChange.from) {
-                    changeSet.remove(prevChange)
-                    newChange = prevChange merge newChange
-                    shift = prevChange.text.length
-                }
-                if (nextChange != null) {
-                    val oldLength = newChange.text.length
-                    newChange = newChange merge nextChange
-                    changeSet.remove(nextChange)
-                    newTo = inChange(newChange, oldLength)
-                }
-                newFrom =
-                    if (newChange.text.isNotEmpty()) inChange(
-                        newChange,
-                        shift
-                    ) else to
-                newChange
-            }
+            from is PositionInResult.InChange && to is PositionInResult.InOriginal -> handleChangeToOriginal(
+                from,
+                to,
+                text
+            )
 
-            from is PositionInResult.InChange && to is PositionInResult.InOriginal -> {
-                guard(from.position == 0) { throw TextException.IntersectingChanges() }
-                val change = changeSet.ceiling(from.change)
-                guard(change == from.change) { throw TextException.IntersectingChanges() }
-                val oldChange = from.change
-                changeSet.remove(oldChange)
-                val newChange = TextChange(from.change.from, to.position, text)
-                newFrom = if (text.isNotEmpty()) inChange(newChange, 0) else to
-                newChange
-            }
-
-            else -> {
-                from as PositionInResult.InChange
-                to as PositionInResult.InChange
-                guard(from.change == to.change) { throw TextException.IntersectingChanges() }
-                val oldChange = from.change
-                val oldString = oldChange.text
-                val newString =
-                    oldString.replaceRange(from.position..<to.position, text)
-                changeSet.remove(oldChange)
-                val newChange =
-                    TextChange(oldChange.from, oldChange.to, newString)
-                newFrom = inChange(newChange, from.position)
-                newTo = inChange(newChange, to.position + text.length)
-                newChange
-            }
+            else -> handleInsideChange(
+                from as PositionInResult.InChange,
+                to as PositionInResult.InChange,
+                text
+            )
         }
         changeSet.add(newChange)
         val newRange = newFrom upTo newTo
@@ -156,7 +198,7 @@ class TextWithChanges(private val original: String) {
     }
 
 
-    private fun searchInOriginalWithChanges(
+    private fun searchInMiddle(
         range: IntRange, predicate: (Char) -> Boolean, fromStart: Boolean
     ): Pair<PositionInResult, ResultType>? {
         val changes =
@@ -192,7 +234,16 @@ class TextWithChanges(private val original: String) {
         }
     }
 
-    private fun getPositions(range: RangeInResult): Pair<Int, Int> {
+    /*
+    * Given a RangeInResult, returns a pair of Ints that represents the middle
+    * part for searching/counting in the given text range. The idea is that if
+    * one of the extremities is a position relative to a change then we perform
+    * a search/count in a part of the change that is encompassed by the range
+    * and return the original text position after/before the change. So, if the
+    * search range looks like this: <change>one<middle>two<change>, then the
+    * return value is equal to Pair(one, two)
+    */
+    private fun getMiddleSearchPositions(range: RangeInResult): Pair<Int, Int> {
         val start = when (range.start) {
             is PositionInResult.InOriginal -> range.start.position
             is PositionInResult.InChange -> range.start.change.to
@@ -208,8 +259,8 @@ class TextWithChanges(private val original: String) {
     // start), and a flag “what to search” (non-whitespace characters, line breaks,
     // or both), return a result (not found, found a non-whitespace character, found
     // a line break) and the position of the found character.
-    fun search(
-        range: RangeInResult, type: SearchType, fromStart: Boolean = true
+    private fun search(
+        range: RangeInResult, type: SearchType, fromStart: Boolean
     ): Pair<PositionInResult, ResultType>? {
         try {
             validateRange(range)
@@ -218,12 +269,12 @@ class TextWithChanges(private val original: String) {
                 SearchType.LINE_BREAK -> { it -> it == '\n' }
                 SearchType.BOTH -> { it -> !it.isWhitespace() || it == '\n' }
             }
-            val (start, end) = getPositions(range)
+            val (start, end) = getMiddleSearchPositions(range)
             var found: Pair<PositionInResult, ResultType>?
             if (range.start is PositionInResult.InChange) {
                 found = searchInChange(
                     range.start.change,
-                    range.start.position..range.start.change.text.length,
+                    range.start.position..<range.start.change.text.length,
                     predicate,
                     fromStart
                 )
@@ -231,7 +282,7 @@ class TextWithChanges(private val original: String) {
             }
             if (start <= end) {
                 found =
-                    searchInOriginalWithChanges(
+                    searchInMiddle(
                         start..<end,
                         predicate,
                         fromStart
@@ -253,36 +304,68 @@ class TextWithChanges(private val original: String) {
         }
     }
 
+    fun search(
+        range: RangeInResult,
+        searchType: SearchType
+    ): Pair<PositionInResult, ResultType>? = search(range, searchType, true)
+
+    fun searchFirst(
+        range: RangeInResult,
+        searchType: SearchType
+    ): Pair<PositionInResult, ResultType>? = search(range, searchType)
+
+    fun searchLast(
+        range: RangeInResult,
+        searchType: SearchType
+    ): Pair<PositionInResult, ResultType>? = search(range, searchType, false)
+
     /**
-     * Checks if a given position in original text has a change applied to it
-     * and returns a corresponding TextChange object if it does so, otherwise
-     * returns null.
+     * If the given position relative to the original text has a change applied
+     * to it, returns the adequate TextChange object. Otherwise, returns null.
      */
     private fun findChange(originalPos: Int): TextChange? =
         this.changeSet.find { it.checkInRange(originalPos) }
 
+    /**
+     * If the given TextChange object is present in this instance, returns it.
+     * Otherwise, returns null.
+     */
     private fun findChange(change: TextChange): TextChange? =
         this.changeSet.find { it == change }
 
-    private fun countInChange(
-        change: TextChange, predicate: (Char) -> Int
-    ): Int = change.text.sumOf(predicate)
 
+    /**
+     * Given a TextChange and a weight function returns an Int value that
+     * corresponds to applying the weight function to each of the Chars in the
+     * given RangeInResult.
+     */
     private fun countInChange(
-        change: TextChange, range: IntRange, predicate: (Char) -> Int
-    ): Int = change.text.substring(range).sumOf(predicate)
+        change: TextChange, weightFunc: (Char) -> Int
+    ): Int = change.text.sumOf(weightFunc)
+
+    /**
+     * Given a TextChange, a range within the change and a weight function
+     * returns an Int that corresponds to applying the weight function to each
+     * of the Chars in the given RangeInResult.
+     */
+    private fun countInChange(
+        change: TextChange, range: IntRange, weightFunc: (Char) -> Int
+    ): Int = change.text.substring(range).sumOf(weightFunc)
 
     private fun countInOriginal(
-        range: IntRange, predicate: (Char) -> Int
-    ) = original.substring(range).sumOf(predicate)
+        range: IntRange, weightFunc: (Char) -> Int
+    ) = original.substring(range).sumOf(weightFunc)
 
 
-    private fun countInOriginalWithChanges(
-        range: IntRange, predicate: (Char) -> Int
+    /**
+     * Performs the middle part count.
+     */
+    private fun countInMiddle(
+        range: IntRange, weightFunc: (Char) -> Int
     ): Int {
         val changes =
             changeSet.filter { it.from >= range.first + 1 && it.to <= range.last + 1 }
-        if (changes.isEmpty()) return countInOriginal(range, predicate) else {
+        if (changes.isEmpty()) return countInOriginal(range, weightFunc) else {
             var result = 0
             val iter = changes.iterator()
             var change: TextChange? = iter.next()
@@ -290,14 +373,14 @@ class TextWithChanges(private val original: String) {
             while (i <= range.last || change != null) {
                 if (change != null) {
                     result += if (i == change.from) countInChange(
-                        change, predicate
-                    ) else countInOriginal(i..<change.from, predicate)
+                        change, weightFunc
+                    ) else countInOriginal(i..<change.from, weightFunc)
                     val newI = if (i == change.from) change.to else change.from
                     if (i == change.from)
                         change = if (iter.hasNext()) iter.next() else null
                     i = newI
                 } else {
-                    result += countInOriginal(i..range.last, predicate)
+                    result += countInOriginal(i..range.last, weightFunc)
                     break
                 }
             }
@@ -305,26 +388,38 @@ class TextWithChanges(private val original: String) {
         }
     }
 
+    /**
+     * Given a RangeInResult and a weight function, returns an Int value that
+     * corresponds to applying the weight function to each of the Chars in the
+     * RangeInResult.
+     */
     private fun countInText(
-        range: RangeInResult, predicate: (Char) -> Int
+        range: RangeInResult, weightFunc: (Char) -> Int
     ): Int {
         validateRange(range)
-        val (start, end) = getPositions(range)
+        val (start, end) = getMiddleSearchPositions(range)
         var result = 0
+        if (range.start is PositionInResult.InChange && range.end is PositionInResult.InChange && range.start.change == range.end.change) {
+            return this.countInChange(
+                range.start.change,
+                range.start.position..<range.end.position,
+                weightFunc
+            )
+        }
         if (range.start is PositionInResult.InChange) {
             result += this.countInChange(
                 range.start.change,
                 range.start.position..<range.start.change.text.length,
-                predicate
+                weightFunc
             )
         }
         if (start < end)
-            result += this.countInOriginalWithChanges(start..<end, predicate)
+            result += this.countInMiddle(start..<end, weightFunc)
         if (range.end is PositionInResult.InChange) {
             result += this.countInChange(
                 range.end.change,
                 0..<range.end.position,
-                predicate,
+                weightFunc,
             )
         }
         return result
@@ -340,14 +435,20 @@ class TextWithChanges(private val original: String) {
     /**
      * Counts the amount of visual spaces in a given range. The result value
      * takes into account the visual offset of other whitespace characters, such
-     * as tabs.
+     * as tabs. The visual space per tab character amount is passed as an
+     * additional argument of this function.
      */
     fun countSpaces(range: RangeInResult, spacesPerTab: Int): Int {
         var col = 0
         return countInText(range) {
             val result = when (it) {
                 ' ' -> 1
-                '\t' -> spacesPerTab - col
+                '\t' -> {
+                    val result = spacesPerTab - col
+                    col = spacesPerTab - 1
+                    result
+                }
+
                 else -> 0
             }
             col = (col + 1) % spacesPerTab
@@ -355,6 +456,10 @@ class TextWithChanges(private val original: String) {
         }
     }
 
+    /**
+     * Returns the string that results from applying the changes present in this
+     * object.
+     */
     fun applyChanges(): String {
         var offset = 0
         var result = original
@@ -367,5 +472,39 @@ class TextWithChanges(private val original: String) {
         return result
     }
 }
+
+
+fun searchInString(
+    string: String,
+    range: IntRange,
+    predicate: (Char) -> Boolean,
+    fromStart: Boolean
+): Pair<Int, ResultType>? {
+    val index = string.substring(range).run {
+        if (fromStart) indexOfFirst(predicate) else indexOfLast(predicate)
+    }
+    return if (index == -1) null else Pair(
+        index,
+        if (string[index] == '\n') ResultType.LINE_BREAK else ResultType.NON_WHITESPACE
+    )
+}
+
+fun searchInChange(
+    change: TextChange,
+    range: IntRange,
+    predicate: (Char) -> Boolean,
+    fromStart: Boolean
+): Pair<PositionInResult, ResultType>? {
+    val result = searchInString(change.text, range, predicate, fromStart)
+    return if (result == null) null else {
+        val (index, type) = result
+        Pair(inChange(change, index), type)
+    }
+}
+
+fun searchInChange(
+    change: TextChange, predicate: (Char) -> Boolean, fromStart: Boolean
+): Pair<PositionInResult, ResultType>? =
+    searchInChange(change, change.from..change.to, predicate, fromStart)
 
 fun String.withChanges() = TextWithChanges(this)

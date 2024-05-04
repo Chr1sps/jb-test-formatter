@@ -3,7 +3,6 @@ package io.github.chr1sps
 
 class TextChange(val from: Int, val to: Int, val text: String) :
     Comparable<TextChange> {
-    private val id = genID()
     val offset: Int
         get() = to - from - text.length
 
@@ -11,11 +10,6 @@ class TextChange(val from: Int, val to: Int, val text: String) :
         require(to >= 0)
         require(from in 0..to)
         require(text.isBlank())
-    }
-
-    companion object {
-        private var id = 0L
-        fun genID() = id++
     }
 
     override fun compareTo(other: TextChange) = (this.from - other.from)

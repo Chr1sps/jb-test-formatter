@@ -198,6 +198,59 @@ class TextWithChanges(private val original: String) {
     }
 
 
+    private fun searchLastInMiddle(
+        range: IntRange, predicate: (Char) -> Boolean
+    ): Pair<PositionInResult, ResultType>? {
+
+        val changes =
+            changeSet.filter { it.from >= range.first + 1 && it.to <= range.last + 1 }
+        if (changes.isEmpty()) return searchInOriginal(
+            range, predicate, false
+        ) else {
+            val iter = changes.reversed().iterator()
+            var change: TextChange? = iter.next()
+
+
+            var i = if (change != null && range.last + 1 == change.to) {
+                val found = searchInChange(change, predicate, false)
+                if (found != null) return found
+                val init = change.from
+                change = if (iter.hasNext()) iter.next() else null
+                init
+            } else range.last
+
+            while (i >= range.first || change != null) {
+                if (change != null) {
+                    val found: Pair<PositionInResult, ResultType>? =
+                        if (i == change.from) {
+                            searchInChange(change, predicate, false)
+                        } else {
+                            searchInOriginal(
+                                change.to..<i, predicate, false
+                            )
+                        }
+                    if (found != null) return found
+                    else {
+                        val newI =
+                            if (i == change.to) change.from else change.to
+                        if (i == change.from)
+                            change =
+                                if (iter.hasNext()) iter.next() else null
+                        i = newI
+                    }
+
+                } else {
+                    return searchInOriginal(
+                        range.first..<i,
+                        predicate,
+                        false
+                    )
+                }
+            }
+            return null
+        }
+    }
+
     private fun searchInMiddle(
         range: IntRange, predicate: (Char) -> Boolean, fromStart: Boolean
     ): Pair<PositionInResult, ResultType>? {
@@ -209,25 +262,31 @@ class TextWithChanges(private val original: String) {
             val iter = changes.iterator()
             var change: TextChange? = iter.next()
             var i = range.first
-            while (i <= range.last) {
+            while (i <= range.last || change != null) {
                 if (change != null) {
                     val found: Pair<PositionInResult, ResultType>? =
                         if (i == change.from) {
                             searchInChange(change, predicate, fromStart)
                         } else {
                             searchInOriginal(
-                                i..change.from, predicate, fromStart
+                                i..<change.from, predicate, fromStart
                             )
                         }
                     if (found != null) return found
                     else {
-                        i = if (i == change.from) change.to else change.from
-                        change = if (iter.hasNext()) iter.next()
-                        else null
+                        val newI =
+                            if (i == change.from) change.to else change.from
+                        if (i == change.from)
+                            change = if (iter.hasNext()) iter.next() else null
+                        i = newI
                     }
 
                 } else {
-                    return searchInOriginal(i..range.last, predicate, fromStart)
+                    return searchInOriginal(
+                        i..<range.last,
+                        predicate,
+                        fromStart
+                    )
                 }
             }
             return null
@@ -265,8 +324,14 @@ class TextWithChanges(private val original: String) {
         try {
             validateRange(range)
             val predicate: (Char) -> Boolean = when (type) {
-                SearchType.NON_WHITESPACE -> { it -> !it.isWhitespace() }
-                SearchType.LINE_BREAK -> { it -> it == '\n' }
+                SearchType.NON_WHITESPACE -> { it ->
+                    !it.isWhitespace()
+                }
+
+                SearchType.LINE_BREAK -> { it ->
+                    it == '\n'
+                }
+
                 SearchType.BOTH -> { it -> !it.isWhitespace() || it == '\n' }
             }
             val (start, end) = getMiddleSearchPositions(range)
@@ -292,7 +357,7 @@ class TextWithChanges(private val original: String) {
             if (range.end is PositionInResult.InChange) {
                 found = searchInChange(
                     range.end.change,
-                    0..range.end.position,
+                    0..<range.end.position,
                     predicate,
                     fromStart
                 )
@@ -307,17 +372,59 @@ class TextWithChanges(private val original: String) {
     fun search(
         range: RangeInResult,
         searchType: SearchType
-    ): Pair<PositionInResult, ResultType>? = search(range, searchType, true)
+    ): Pair<PositionInResult, ResultType>? =
+        search(range, searchType, true)
 
     fun searchFirst(
         range: RangeInResult,
         searchType: SearchType
-    ): Pair<PositionInResult, ResultType>? = search(range, searchType)
+    ): Pair<PositionInResult, ResultType>? =
+        search(range, searchType)
 
     fun searchLast(
         range: RangeInResult,
         searchType: SearchType
-    ): Pair<PositionInResult, ResultType>? = search(range, searchType, false)
+    ): Pair<PositionInResult, ResultType>? {
+        try {
+            validateRange(range)
+            val predicate: (Char) -> Boolean = when (searchType) {
+                SearchType.NON_WHITESPACE -> { it -> !it.isWhitespace() }
+                SearchType.LINE_BREAK -> { it -> it == '\n' }
+                SearchType.BOTH -> { it -> !it.isWhitespace() || it == '\n' }
+            }
+            val (start, end) = getMiddleSearchPositions(range)
+            var found: Pair<PositionInResult, ResultType>?
+            if (range.end is PositionInResult.InChange) {
+                found = searchInChange(
+                    range.end.change,
+                    0..<range.end.position,
+                    predicate,
+                    false
+                )
+                if (found != null) return found
+            }
+            if (start <= end) {
+                found =
+                    searchLastInMiddle(
+                        start..<end,
+                        predicate,
+                    )
+                if (found != null) return found
+            }
+            if (range.start is PositionInResult.InChange) {
+                found = searchInChange(
+                    range.start.change,
+                    range.start.position..<range.start.change.text.length,
+                    predicate,
+                    false
+                )
+                if (found != null) return found
+            }
+            return null
+        } catch (_: IllegalArgumentException) {
+            return null
+        }
+    }
 
     /**
      * If the given position relative to the original text has a change applied
@@ -483,10 +590,16 @@ fun searchInString(
     val index = string.substring(range).run {
         if (fromStart) indexOfFirst(predicate) else indexOfLast(predicate)
     }
-    return if (index == -1) null else Pair(
-        index,
-        if (string[index] == '\n') ResultType.LINE_BREAK else ResultType.NON_WHITESPACE
-    )
+    return if (index == -1) null else {
+        Pair(
+            index + range.first,
+            if (string[index] == '\n') {
+                ResultType.LINE_BREAK
+            } else {
+                ResultType.NON_WHITESPACE
+            }
+        )
+    }
 }
 
 fun searchInChange(
@@ -505,6 +618,6 @@ fun searchInChange(
 fun searchInChange(
     change: TextChange, predicate: (Char) -> Boolean, fromStart: Boolean
 ): Pair<PositionInResult, ResultType>? =
-    searchInChange(change, change.from..change.to, predicate, fromStart)
+    searchInChange(change, 0..<change.text.length, predicate, fromStart)
 
 fun String.withChanges() = TextWithChanges(this)

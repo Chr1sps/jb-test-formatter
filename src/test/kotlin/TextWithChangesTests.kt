@@ -419,6 +419,7 @@ class TextWithChangesTests {
                 inOriginal(1) upTo inOriginal(1) replacedWith " ",
                 inOriginal(2) upTo inOriginal(2) replacedWith "\n",
             )
+            // " \na a\n"
             assertEquals(
                 Pair(
                     inChange(TextChange(0, 0, " \n"), 1),
@@ -451,7 +452,7 @@ class TextWithChangesTests {
             )
             assertEquals(
                 Pair(
-                    inChange(TextChange(0, 0, " \n"), 1),
+                    inChange(TextChange(2, 2, "\n"), 0),
                     ResultType.LINE_BREAK
                 ),
                 original.searchLast(
@@ -468,7 +469,7 @@ class TextWithChangesTests {
             )
             assertEquals(
                 Pair(
-                    inChange(TextChange(0, 0, " \n"), 1),
+                    inChange(TextChange(2, 2, "\n"), 0),
                     ResultType.LINE_BREAK
                 ),
                 original.searchLast(
@@ -480,6 +481,66 @@ class TextWithChangesTests {
 
         @Test
         fun testRemoved() {
+            val original = " \na a\n".addChanges(
+                inOriginal(0) upTo inOriginal(2) replacedWith "",
+                inOriginal(3) upTo inOriginal(4) replacedWith "",
+                inOriginal(5) upTo inOriginal(6) replacedWith "",
+            )
+            assertEquals(
+                null,
+                original.search(
+                    inOriginal(2) upTo inOriginal(6),
+                    SearchType.LINE_BREAK
+                )
+            )
+            assertEquals(
+                Pair(
+                    PositionInResult.InOriginal(2),
+                    ResultType.NON_WHITESPACE
+                ),
+                original.search(
+                    inOriginal(2) upTo inOriginal(6),
+                    SearchType.NON_WHITESPACE
+                )
+            )
+            assertEquals(
+                Pair(
+                    PositionInResult.InOriginal(2),
+                    ResultType.NON_WHITESPACE
+                ),
+                original.search(
+                    inOriginal(2) upTo inOriginal(6),
+                    SearchType.BOTH
+                )
+            )
+            assertEquals(
+                null,
+                original.searchLast(
+                    inOriginal(2) upTo inOriginal(6),
+                    SearchType.LINE_BREAK
+                )
+            )
+            assertEquals(
+                Pair(
+                    PositionInResult.InOriginal(4),
+                    ResultType.NON_WHITESPACE
+                ),
+                original.searchLast(
+                    inOriginal(2) upTo inOriginal(6),
+                    SearchType.NON_WHITESPACE
+                )
+            )
+            assertEquals(
+                Pair(
+                    PositionInResult.InOriginal(4),
+                    ResultType.NON_WHITESPACE
+                ),
+                original.searchLast(
+                    inOriginal(2) upTo inOriginal(6),
+                    SearchType.BOTH
+                )
+            )
+
         }
     }
 
